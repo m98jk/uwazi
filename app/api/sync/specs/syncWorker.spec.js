@@ -598,7 +598,7 @@ describe('syncWorker', () => {
 
   describe('start', () => {
     it('should not fail on sync not in settings', async () => {
-      await settingsModel.db.update({}, { $unset: { sync: '' } });
+      await settingsModel.updateMany({}, { $unset: { sync: '' } });
       spyOn(syncWorker, 'intervalSync');
       const interval = 2000;
 

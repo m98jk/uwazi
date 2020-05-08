@@ -7,7 +7,10 @@ import helmet from 'helmet';
 import { Server } from 'http';
 import mongoose from 'mongoose';
 import path from 'path';
+
+import { MultiTenantConfig } from 'api/config/tenancy';
 import { TaskProvider } from 'shared/tasks/tasks';
+
 import uwaziMessage from '../message';
 import apiRoutes from './api/api';
 import privateInstanceMiddleware from './api/auth/privateInstanceMiddleware';
@@ -26,6 +29,8 @@ import errorHandlingMiddleware from './api/utils/error_handling_middleware';
 import handleError from './api/utils/handleError.js';
 import repeater from './api/utils/Repeater';
 import serverRenderingRoutes from './react/server.js';
+import * as DB from './api/odm/DB';
+import { tenants } from './api/odm/tenantContext';
 
 mongoose.Promise = Promise;
 
@@ -56,19 +61,43 @@ app.use('/public', express.static(paths.publicAssets));
 
 app.use(/\/((?!remotepublic).)*/, bodyParser.json({ limit: '1mb' }));
 
+// WTFFFF !!!!!
+// wrap all app.use function handlers with tenant async context :(
+const originalAppUseFn = app.use;
+if (MultiTenantConfig.active) {
+  app.use = function wrapedUse(...args) {
+    const lastArg = args.length - 1;
+    if (typeof args[lastArg] === 'function') {
+      const handler = args[lastArg];
+      args[lastArg] = (req, res, next) => {
+        tenants.run({ name: req.get('tenant') }, async () => {
+          handler(req, res, next);
+        });
+      };
+    }
+    originalAppUseFn.apply(this, args);
+  };
+}
+// WTFFFF !!!!!
+
 authRoutes(app);
 
 app.use(privateInstanceMiddleware);
-app.use('/flag-images', express.static(path.resolve(__dirname, '../dist/flags')));
-app.use('/assets', express.static(paths.customUploads));
+
+originalAppUseFn.call(
+  app,
+  '/flag-images',
+  express.static(path.resolve(__dirname, '../dist/flags'))
+);
+originalAppUseFn.call(app, '/assets', express.static(paths.customUploads));
 // retained for backwards compatibility
-app.use('/uploaded_documents', express.static(paths.customUploads));
+originalAppUseFn.call(app, '/uploaded_documents', express.static(paths.customUploads));
 
 apiRoutes(app, http);
 
 serverRenderingRoutes(app);
 
-app.use(errorHandlingMiddleware);
+originalAppUseFn.call(app, errorHandlingMiddleware);
 
 let dbAuth = {};
 
@@ -81,30 +110,29 @@ if (process.env.DBUSER) {
 }
 
 console.info('==> Connecting to', dbConfig[app.get('env')]);
-mongoose
-  .connect(dbConfig[app.get('env')], {
-    ...dbAuth,
-    useUnifiedTopology: true,
-    useNewUrlParser: true,
-    useCreateIndex: true,
-  })
-  .then(async () => {
-    console.info('==> Processing system keys...');
-    await translations.processSystemKeys(systemKeys);
+DB.connect(dbConfig[app.get('env')], dbAuth).then(async () => {
+  // just for testing, manually added tenants, this needs to be added via some other process
+  tenants.add({ name: 'uwazi_development' });
+  tenants.add({ name: 'tenant2' });
+  //
 
+  console.info('==> Processing system keys...');
+
+  if (!MultiTenantConfig.active) {
+    await translations.processSystemKeys(systemKeys);
     const shouldMigrate = await migrator.shouldMigrate();
     if (shouldMigrate) {
       console.info('\x1b[33m%s\x1b[0m', '==> Your database needs to be migrated, please wait.');
       await migrator.migrate();
     }
 
-    const port = ports[app.get('env')];
-
-    const bindAddress = { true: 'localhost' }[process.env.LOCALHOST_ONLY];
-
     semanticSearchManager.start();
+  }
 
-    http.listen(port, bindAddress, async () => {
+  const port = ports[app.get('env')];
+  const bindAddress = { true: 'localhost' }[process.env.LOCALHOST_ONLY];
+  http.listen(port, bindAddress, async () => {
+    if (!MultiTenantConfig.active) {
       syncWorker.start();
 
       const { evidencesVault } = await settings.get();
@@ -121,16 +149,18 @@ mongoose
           }),
         10000
       );
+    }
 
-      console.info(
-        '==> 🌎 Listening on port %s. Open up http://localhost:%s/ in your browser.',
-        port,
-        port
-      );
-      if (process.env.HOT) {
-        console.info('');
-        console.info('==> 📦 webpack is watching...');
-        console.info(uwaziMessage);
-      }
-    });
+    console.info(
+      '==> 🌎 Listening on port %s. Open up http://localhost:%s/ in your browser.',
+      port,
+      port
+    );
+
+    if (process.env.HOT) {
+      console.info('');
+      console.info('==> 📦 webpack is watching...');
+      console.info(uwaziMessage);
+    }
   });
+});

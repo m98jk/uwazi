@@ -1,5 +1,3 @@
-/** @format */
-
 import connect, { disconnect } from 'api/utils/connect_to_mongo';
 import request from '../app/shared/JSONRequest';
 import elasticMapping from './elastic_mapping';

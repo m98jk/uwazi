@@ -1,8 +1,9 @@
-import mongoose from 'mongoose';
+import mongoose, { Connection } from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Db, ObjectId } from 'mongodb';
 import { FileType } from 'shared/types/fileType';
 import { EntitySchema } from 'shared/types/entityType';
+import * as DB from 'api/odm/DB';
 
 mongoose.Promise = Promise;
 mongoose.set('useFindAndModify', false);
@@ -39,20 +40,18 @@ const fixturer = {
   },
 };
 
+let mongooseConnection: Connection;
+
 const initMongoServer = async () => {
   mongod = new MongoMemoryServer();
   const uri = await mongod.getUri();
-  await mongoose.connect(uri, {
-    useUnifiedTopology: true,
-    useNewUrlParser: true,
-    useCreateIndex: true,
-  });
+  mongooseConnection = await DB.connect(uri);
   connected = true;
 };
 
 const testingDB: {
   mongodb: Db | null;
-  connect: () => Promise<void>;
+  connect: () => Promise<Connection>;
   disconnect: () => Promise<void>;
   id: (id?: string | undefined) => ObjectId;
   clear: (collections?: string[] | undefined) => Promise<void>;
@@ -63,9 +62,10 @@ const testingDB: {
   async connect() {
     if (!connected) {
       await initMongoServer();
-      mongodb = mongoose.connections[0].db;
+      mongodb = mongooseConnection.db;
       this.mongodb = mongodb;
     }
+    return mongooseConnection;
   },
 
   async disconnect() {

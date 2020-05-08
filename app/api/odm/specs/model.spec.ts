@@ -1,5 +1,3 @@
-/** @format */
-
 import mongoose from 'mongoose';
 import { ensure } from 'shared/tsUtils';
 import { model as updatelogsModel } from 'api/updatelogs';
@@ -41,7 +39,7 @@ describe('ODM Model', () => {
   describe('Save', () => {
     it('should be able to create when passing an _id and it does not exists', async () => {
       const extendedModel = instanceModel<TestDoc>('tempSchema', testSchema);
-      const id: mongoose.Schema.Types.ObjectId = testingDB.id();
+      const id = testingDB.id();
       const savedDoc = await extendedModel.save({
         _id: id,
         name: 'document 1',
@@ -102,7 +100,7 @@ describe('ODM Model', () => {
     it('should intercept updateMany', async () => {
       const newDocument3 = await extendedModel.save({ name: 'document 3' });
       Date.now = () => 3;
-      await extendedModel.db.updateMany(
+      await extendedModel.updateMany(
         { _id: { $in: [newDocument1._id, newDocument2._id] } },
         { $set: { name: 'same name' } }
       );
@@ -158,7 +156,7 @@ describe('ODM Model', () => {
       });
 
       it('should intercept model delete with id as string', async () => {
-        await extendedModel.delete(newDocument2._id.toString());
+        await extendedModel.delete(newDocument2._id);
         const logEntries = await updatelogsModel.find({});
 
         expect(logEntries.length).toBe(2);
